@@ -5,12 +5,20 @@ from openai import OpenAI
 
 app = FastAPI()
 
-# Cliente OpenAI
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
+# --- Validación de variables de entorno ---
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+
+if not OPENAI_API_KEY:
+    raise ValueError("Falta la variable de entorno OPENAI_API_KEY")
+if not TELEGRAM_TOKEN:
+    raise ValueError("Falta la variable de entorno TELEGRAM_TOKEN")
+
+# --- Configuración de clientes y URLs ---
+client = OpenAI(api_key=OPENAI_API_KEY)
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
+# --- Información del negocio ---
 system_prompt = """
 Eres un asistente virtual de Go Waffles. Solo responde preguntas sobre el negocio usando la información disponible.
 Habla de manera juvenil y cercana, usando emojis donde sea apropiado.
@@ -55,18 +63,32 @@ def responder_pregunta(pregunta):
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request):
     data = await request.json()
+    print("Recibido de Telegram:", data)  # útil para logs en Railway
+
     try:
         mensaje = data["message"]["text"]
         chat_id = data["message"]["chat"]["id"]
     except KeyError:
+        print("Mensaje no contiene texto o chat_id. Ignorado.")
         return {"status": "ignored"}
 
-    respuesta = responder_pregunta(mensaje)
+    try:
+        respuesta = responder_pregunta(mensaje)
+        print(f"Respondiendo a {chat_id}: {respuesta}")
+    except Exception as e:
+        print(f"Error al generar respuesta con OpenAI: {e}")
+        respuesta = "¡Ups! Tuve un pequeño problema, pero ya lo estoy resolviendo. ¿Puedes repetir tu pregunta? 🧇"
 
-    requests.post(TELEGRAM_URL, json={"chat_id": chat_id, "text": respuesta})
+    try:
+        response = requests.post(TELEGRAM_URL, json={"chat_id": chat_id, "text": respuesta})
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"Error al enviar mensaje a Telegram: {e}")
+        return {"status": "error", "detalle": str(e)}
+
     return {"status": "ok"}
 
-# --- ENDPOINT WEB ---
+# --- ENDPOINT WEB (para pruebas o frontend) ---
 @app.post("/webhook/web")
 async def web_webhook(request: Request):
     data = await request.json()
@@ -75,5 +97,13 @@ async def web_webhook(request: Request):
     except KeyError:
         return {"status": "error", "detalle": "no se recibió 'mensaje'"}
 
-    respuesta = responder_pregunta(mensaje)
-    return {"respuesta": respuesta}
+    try:
+        respuesta = responder_pregunta(mensaje)
+        return {"respuesta": respuesta}
+    except Exception as e:
+        return {"status": "error", "detalle": str(e)}
+
+# --- Endpoints de salud (opcional pero útil en Railway) ---
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
