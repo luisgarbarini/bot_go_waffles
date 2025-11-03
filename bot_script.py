@@ -1,12 +1,11 @@
 from fastapi import FastAPI, Request
-import openai
-from openai import OpenAI
 import os
-import json
 import requests
+from openai import OpenAI
 
 app = FastAPI()
 
+# Cliente OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -39,16 +38,15 @@ def generar_contexto(info):
 
 def responder_pregunta(pregunta):
     contexto = generar_contexto(info_negocio)
-
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"{contexto}\nPregunta del usuario: {pregunta}"}
     ]
 
     respuesta = client.chat.completions.create(
-      model="gpt-3.5-turbo",
-      messages=messages,
-      temperature=0.3
+        model="gpt-3.5-turbo",
+        messages=messages,
+        temperature=0.3
     )
 
     return respuesta.choices[0].message.content
@@ -65,10 +63,7 @@ async def telegram_webhook(request: Request):
 
     respuesta = responder_pregunta(mensaje)
 
-    # enviar respuesta a Telegram
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": chat_id, "text": respuesta})
-
+    requests.post(TELEGRAM_URL, json={"chat_id": chat_id, "text": respuesta})
     return {"status": "ok"}
 
 # --- ENDPOINT WEB ---
