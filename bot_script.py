@@ -8,7 +8,6 @@ import requests
 app = FastAPI()
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=openai.api_key)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 system_prompt = """
@@ -44,7 +43,7 @@ def responder_pregunta(pregunta):
         {"role": "user", "content": f"{contexto}\nPregunta del usuario: {pregunta}"}
     ]
 
-    respuesta = client.chat.completions.create(
+    respuesta = openai.chat.completions.create(
       model="gpt-3.5-turbo",
       messages=messages,
       temperature=0.3
