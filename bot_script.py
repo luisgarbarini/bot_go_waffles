@@ -7,8 +7,10 @@ import requests
 
 app = FastAPI()
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
 system_prompt = """
 Eres un asistente virtual de Go Waffles. Solo responde preguntas sobre el negocio usando la información disponible.
@@ -43,7 +45,7 @@ def responder_pregunta(pregunta):
         {"role": "user", "content": f"{contexto}\nPregunta del usuario: {pregunta}"}
     ]
 
-    respuesta = openai.chat.completions.create(
+    respuesta = client.chat.completions.create(
       model="gpt-3.5-turbo",
       messages=messages,
       temperature=0.3
