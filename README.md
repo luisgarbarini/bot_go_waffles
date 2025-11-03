@@ -5,6 +5,7 @@ Bot de atención al cliente para Go Waffles, funcionando en Telegram y en la web
 ---
 
 ## Estructura del proyecto
+```
 
 go_waffles_bot/
 │
@@ -12,6 +13,7 @@ go_waffles_bot/
 ├─ requirements.txt <- Librerías necesarias
 ├─ Procfile <- Comando de inicio para Railway
 └─ .gitignore <- Archivos/carpetas a ignorar en GitHub
+```
 
 
 ---
