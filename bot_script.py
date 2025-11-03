@@ -8,6 +8,7 @@ import requests
 app = FastAPI()
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=openai.api_key)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 system_prompt = """
