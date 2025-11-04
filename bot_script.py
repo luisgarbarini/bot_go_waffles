@@ -5,20 +5,13 @@ from openai import OpenAI
 
 app = FastAPI()
 
-# --- Validación de variables de entorno ---
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Cliente OpenAI (usa la clave de entorno; si es None, fallará solo al usarlo)
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# URL base de Telegram (se construye con el token de entorno)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage" if TELEGRAM_TOKEN else ""
 
-if not OPENAI_API_KEY:
-    raise ValueError("Falta la variable de entorno OPENAI_API_KEY")
-if not TELEGRAM_TOKEN:
-    raise ValueError("Falta la variable de entorno TELEGRAM_TOKEN")
-
-# --- Configuración de clientes y URLs ---
-client = OpenAI(api_key=OPENAI_API_KEY)
-TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-
-# --- Información del negocio ---
 system_prompt = """
 Eres un asistente virtual de Go Waffles. Solo responde preguntas sobre el negocio usando la información disponible.
 Habla de manera juvenil y cercana, usando emojis donde sea apropiado.
@@ -45,65 +38,78 @@ def generar_contexto(info):
     return contexto
 
 def responder_pregunta(pregunta):
+    # Si no hay API key, responde con mensaje de error
+    if not os.getenv("OPENAI_API_KEY"):
+        return "⚠️ Ups, mi cerebro está desconectado. Por favor avisa al equipo de Go Waffles."
+
     contexto = generar_contexto(info_negocio)
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"{contexto}\nPregunta del usuario: {pregunta}"}
     ]
 
-    respuesta = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=messages,
-        temperature=0.3
-    )
-
-    return respuesta.choices[0].message.content
+    try:
+        respuesta = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
+            temperature=0.3,
+            timeout=10  # Evita bloqueos largos
+        )
+        return respuesta.choices[0].message.content
+    except Exception as e:
+        print(f"Error al llamar a OpenAI: {e}")
+        return "¡Ups! Tuve un pequeño error al pensar mi respuesta. ¿Puedes repetirme tu pregunta? 🧇"
 
 # --- ENDPOINT TELEGRAM ---
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request):
+    # Validaciones básicas
+    if not TELEGRAM_TOKEN or not TELEGRAM_URL:
+        print("❌ TELEGRAM_TOKEN no está definido")
+        return {"status": "error", "detalle": "Token de Telegram no configurado"}
+
     data = await request.json()
-    print("Recibido de Telegram:", data)  # útil para logs en Railway
+    print("📥 Recibido de Telegram:", data)
 
     try:
         mensaje = data["message"]["text"]
         chat_id = data["message"]["chat"]["id"]
     except KeyError:
-        print("Mensaje no contiene texto o chat_id. Ignorado.")
+        print("⚠️ Mensaje sin texto o chat_id. Ignorado.")
         return {"status": "ignored"}
 
-    try:
-        respuesta = responder_pregunta(mensaje)
-        print(f"Respondiendo a {chat_id}: {respuesta}")
-    except Exception as e:
-        print(f"Error al generar respuesta con OpenAI: {e}")
-        respuesta = "¡Ups! Tuve un pequeño problema, pero ya lo estoy resolviendo. ¿Puedes repetir tu pregunta? 🧇"
+    respuesta = responder_pregunta(mensaje)
+    print(f"📤 Respondiendo a {chat_id}: {respuesta}")
 
     try:
-        response = requests.post(TELEGRAM_URL, json={"chat_id": chat_id, "text": respuesta})
+        response = requests.post(TELEGRAM_URL, json={"chat_id": chat_id, "text": respuesta}, timeout=5)
         response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        print(f"Error al enviar mensaje a Telegram: {e}")
+    except Exception as e:
+        print(f"❌ Error al enviar a Telegram: {e}")
         return {"status": "error", "detalle": str(e)}
 
     return {"status": "ok"}
 
-# --- ENDPOINT WEB (para pruebas o frontend) ---
+# --- ENDPOINT WEB (para pruebas) ---
 @app.post("/webhook/web")
 async def web_webhook(request: Request):
+    if not os.getenv("OPENAI_API_KEY"):
+        return {"status": "error", "respuesta": "API key no configurada"}
+
     data = await request.json()
     try:
         mensaje = data["mensaje"]
     except KeyError:
-        return {"status": "error", "detalle": "no se recibió 'mensaje'"}
+        return {"status": "error", "detalle": "Falta el campo 'mensaje'"}
 
-    try:
-        respuesta = responder_pregunta(mensaje)
-        return {"respuesta": respuesta}
-    except Exception as e:
-        return {"status": "error", "detalle": str(e)}
+    respuesta = responder_pregunta(mensaje)
+    return {"respuesta": respuesta}
 
-# --- Endpoints de salud (opcional pero útil en Railway) ---
+# --- HEALTH CHECK ---
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
+        "telegram_configured": bool(os.getenv("TELEGRAM_TOKEN"))
+    }
