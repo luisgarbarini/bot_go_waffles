@@ -5,10 +5,7 @@ from openai import OpenAI
 
 app = FastAPI()
 
-# Cliente OpenAI (usa la clave de entorno; si es None, fallará solo al usarlo)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-# URL base de Telegram (se construye con el token de entorno)
+# Obtenemos las variables de entorno (pero NO creamos el cliente aún)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage" if TELEGRAM_TOKEN else ""
 
@@ -38,9 +35,13 @@ def generar_contexto(info):
     return contexto
 
 def responder_pregunta(pregunta):
-    # Si no hay API key, responde con mensaje de error
-    if not os.getenv("OPENAI_API_KEY"):
-        return "⚠️ Ups, mi cerebro está desconectado. Por favor avisa al equipo de Go Waffles."
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        print("❌ OPENAI_API_KEY no está definida en las variables de entorno.")
+        return "⚠️ Ups, no tengo acceso a mi cerebro. Por favor avisa al equipo de Go Waffles."
+
+    # ✅ Creamos el cliente SOLO cuando se necesita y SOLO si hay clave
+    client = OpenAI(api_key=api_key)
 
     contexto = generar_contexto(info_negocio)
     messages = [
@@ -53,19 +54,18 @@ def responder_pregunta(pregunta):
             model="gpt-3.5-turbo",
             messages=messages,
             temperature=0.3,
-            timeout=10  # Evita bloqueos largos
+            timeout=10  # Evita esperas largas
         )
         return respuesta.choices[0].message.content
     except Exception as e:
-        print(f"Error al llamar a OpenAI: {e}")
+        print(f"❌ Error al llamar a OpenAI: {e}")
         return "¡Ups! Tuve un pequeño error al pensar mi respuesta. ¿Puedes repetirme tu pregunta? 🧇"
 
 # --- ENDPOINT TELEGRAM ---
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request):
-    # Validaciones básicas
     if not TELEGRAM_TOKEN or not TELEGRAM_URL:
-        print("❌ TELEGRAM_TOKEN no está definido")
+        print("❌ TELEGRAM_TOKEN no está definido en las variables de entorno.")
         return {"status": "error", "detalle": "Token de Telegram no configurado"}
 
     data = await request.json()
@@ -79,37 +79,4 @@ async def telegram_webhook(request: Request):
         return {"status": "ignored"}
 
     respuesta = responder_pregunta(mensaje)
-    print(f"📤 Respondiendo a {chat_id}: {respuesta}")
-
-    try:
-        response = requests.post(TELEGRAM_URL, json={"chat_id": chat_id, "text": respuesta}, timeout=5)
-        response.raise_for_status()
-    except Exception as e:
-        print(f"❌ Error al enviar a Telegram: {e}")
-        return {"status": "error", "detalle": str(e)}
-
-    return {"status": "ok"}
-
-# --- ENDPOINT WEB (para pruebas) ---
-@app.post("/webhook/web")
-async def web_webhook(request: Request):
-    if not os.getenv("OPENAI_API_KEY"):
-        return {"status": "error", "respuesta": "API key no configurada"}
-
-    data = await request.json()
-    try:
-        mensaje = data["mensaje"]
-    except KeyError:
-        return {"status": "error", "detalle": "Falta el campo 'mensaje'"}
-
-    respuesta = responder_pregunta(mensaje)
-    return {"respuesta": respuesta}
-
-# --- HEALTH CHECK ---
-@app.get("/health")
-async def health_check():
-    return {
-        "status": "ok",
-        "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
-        "telegram_configured": bool(os.getenv("TELEGRAM_TOKEN"))
     }
