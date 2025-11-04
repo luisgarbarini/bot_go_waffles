@@ -1,3 +1,5 @@
+from datetime import datetime
+import pytz 
 from fastapi import FastAPI, Request
 import os
 import requests
@@ -10,21 +12,27 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage" if TELEGRAM_TOKEN else ""
 
 system_prompt = """
-Eres un asistente virtual de Go Waffles. Solo responde preguntas sobre el negocio usando la información disponible.
-Habla de manera juvenil y cercana, usando emojis donde sea apropiado.
-No inventes precios, horarios, promociones ni contactos que no estén en la información proporcionada.
-Tu objetivo es responder de forma clara, humana y divertida.
+Eres el asistente virtual de Go Waffles 🍓. 
+Responde solo preguntas relacionadas con el negocio usando la información disponible. 
+Habla con un tono juvenil y cercano, usando emojis cuando quede bien 😄. 
+No inventes precios, horarios, promociones ni contactos que no estén en los datos que tienes. 
+Si no sabes algo, responde con amabilidad y sugiere escribir a contacto@gowaffles.cl ✉️. 
+No alteres los enlaces web ni cambies su formato. Respétalos exactamente como aparecen porque necesito que sean clickeables.
+Tu meta es sonar natural, claro y buena onda. Evita responder igual ante la misma pregunta para no parecer un bot.
 """
 
 info_negocio = {
-    "ubicacion": "El local se encuentra ubicado en Avenida Gabriel González Videla 3170, La Serena.",
+    "ubicacion": "Estamos ubicados en Avenida Gabriel González Videla 3170, La Serena. También puedes encontrarnos en google maps como 'Go Waffles'.",
     "horarios": "De lunes a viernes entre las 16:00 y 21:00. Sábado y domingo entre 15:30 y 21:30.",
-    "promociones": "15% de descuento usando el cupón PRIMERACOMPRA en gowaffles.cl",
+    "promociones": "Tenemos un 15% de descuento usando el cupón PRIMERACOMPRA en gowaffles.cl",
     "canales_venta": "Puedes comprar en tu delivery app favorita (UberEats, PedidosYa o Rappi) o a través de nuestra página web gowaffles.cl",
     "carta": "Encuentra todos nuestros productos en gowaffles.cl/pedir",
     "trabajo": "Si quieres trabajar con nosotros, puedes escribir a contacto@gowaffles.cl o rellenar el formulario en gowaffles.cl/nosotros",
     "problemas": "Si tuviste algún inconveniente con tu pedido escríbenos a contacto@gowaffles.cl",
-    "ejecutivo": "Si necesitas hablar con un encargado del local, comunícate al https://wa.me/56953717707"
+    "ejecutivo": "Si necesitas hablar con un encargado del local, comunícate al https://wa.me/56953717707",
+    "redes_sociales":"Encuentranos en instagram o tiktok como @gowaffles.cl",
+    "categorías":"Tenemos waffles dulces, salados y personalizados. También tenemos milkshakes, frappes, limonadas, Mini Go, helados y bebidas",
+    "zona_delivery":"Cada delivery app tiene su propio radio de despacho. En gowaffles.cl/local puedes ver la cobertura de despacho para las ventas de nuestro sitio web"
 }
 
 def generar_contexto(info):
@@ -35,6 +43,12 @@ def generar_contexto(info):
     return contexto
 
 def responder_pregunta(pregunta):
+    # Hora actual en La Serena
+    chile_tz = pytz.timezone("America/Santiago")
+    ahora = datetime.now(chile_tz)
+    hora_actual = ahora.strftime("%H:%M")
+
+
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         print("❌ OPENAI_API_KEY no está definida en las variables de entorno.")
@@ -44,6 +58,7 @@ def responder_pregunta(pregunta):
     client = OpenAI(api_key=api_key)
 
     contexto = generar_contexto(info_negocio)
+    contexto += f"\nHora actual en La Serena, Chile: {hora_actual}\n"
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"{contexto}\nPregunta del usuario: {pregunta}"}
