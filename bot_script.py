@@ -79,4 +79,35 @@ async def telegram_webhook(request: Request):
         return {"status": "ignored"}
 
     respuesta = responder_pregunta(mensaje)
+    print(f"📤 Respondiendo a {chat_id}: {respuesta}")
+
+    try:
+        response = requests.post(TELEGRAM_URL, json={"chat_id": chat_id, "text": respuesta}, timeout=5)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"❌ Error al enviar mensaje a Telegram: {e}")
+        return {"status": "error", "detalle": str(e)}
+
+    return {"status": "ok"}
+
+# --- ENDPOINT WEB (para pruebas desde frontend o Postman) ---
+@app.post("/webhook/web")
+async def web_webhook(request: Request):
+    data = await request.json()
+    try:
+        mensaje = data["mensaje"]
+    except KeyError:
+        return {"status": "error", "detalle": "Falta el campo 'mensaje'"}
+
+    respuesta = responder_pregunta(mensaje)
+    return {"respuesta": respuesta}
+
+# --- HEALTH CHECK ---
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "ok",
+        "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
+        "telegram_configured": bool(os.getenv("TELEGRAM_TOKEN")),
+        "webhook_url": "https://go-waffles-bot.up.railway.app/webhook/telegram"
     }
