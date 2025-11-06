@@ -5,7 +5,7 @@ import os
 import requests
 import time
 from openai import OpenAI
-from fuzzywuzzy import process
+from fuzzywuzzy import fuzz
 
 app = FastAPI()
 
@@ -70,31 +70,37 @@ def buscar_en_menu(consulta: str, umbral=60):
     products = obtener_menu()
     if not products:
         return []
-    
-    nombres = [p.get("name", "") for p in products.values()]
-    coincidencias = process.extract(consulta, nombres, limit=3)
+
+    consulta_clean = consulta.lower().strip()
     resultados = []
-    
-    for item in coincidencias:
-        # Soporta tanto (nombre, score) como (nombre, score, idx)
-        nombre_coincidencia = item[0]
-        score = item[1]
+
+    for p in products.values():
+        nombre = p.get("name", "")
+        descripcion = p.get("description", "")
+        texto_completo = f"{nombre} {descripcion}".lower()
+
+        # Comparar la consulta contra nombre + descripción
+        score = fuzz.partial_ratio(consulta_clean, texto_completo)
         
         if score >= umbral:
-            # Encontrar el producto por nombre
-            for p in products.values():
-                if p.get("name") == nombre_coincidencia:
-                    price = (
-                        p.get("availabilityAt", {}).get("finalPrice")
-                        or p.get("availabilityAt", {}).get("basePrice")
-                        or "N/D"
-                    )
-                    resultados.append({
-                        "nombre": p.get("name"),
-                        "precio": price,
-                        "descripcion": p.get("description", "")
-                    })
-                    break
+            price = (
+                p.get("availabilityAt", {}).get("finalPrice")
+                or p.get("availabilityAt", {}).get("basePrice")
+                or "N/D"
+            )
+            resultados.append({
+                "nombre": nombre,
+                "precio": price,
+                "descripcion": descripcion
+            })
+
+        # Evitar listas muy largas
+        if len(resultados) >= 6:
+            break
+
+    # Ordenar por score (opcional, pero mejora relevancia)
+    # → No lo hacemos aquí porque fuzz.partial_ratio no se guarda, pero si quieres, puedo añadirlo
+
     return resultados
 
 # ─── DETECCIÓN DE INTENCIÓN CON OPENAI (CLASIFICACIÓN LIGERA) ─────
