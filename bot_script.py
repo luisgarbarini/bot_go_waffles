@@ -1,23 +1,26 @@
 from datetime import datetime
-import pytz
+import pytz 
 from fastapi import FastAPI, Request
 import os
 import requests
-import time
 from openai import OpenAI
-from fuzzywuzzy import fuzz
 
 app = FastAPI()
 
-# Configuración de Telegram
+# Obtenemos las variables de entorno (pero NO creamos el cliente aún)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage" if TELEGRAM_TOKEN else ""
 
-# Caché del menú
-_menu_cache = None
-_menu_last_fetch = 0
+system_prompt = """
+Eres el asistente virtual de Go Waffles 🍓. 
+Responde solo preguntas relacionadas con el negocio usando la información disponible. 
+Habla con un tono juvenil y cercano, usando emojis cuando quede bien 😄. 
+No inventes precios, horarios, promociones, toppings o información de productos. 
+Si no sabes algo, responde con amabilidad y sugiere escribir a contacto@gowaffles.cl ✉️. 
+No alteres los enlaces web ni cambies su formato. Respétalos exactamente como aparecen porque necesito que sean clickeables.
+Tu meta es sonar natural, claro y buena onda. Evita responder igual ante la misma pregunta para no parecer un bot.
+"""
 
-# Tu info de negocio (sin cambios)
 info_negocio = {
     "ubicacion": "Estamos ubicados en Avenida Gabriel González Videla 3170, La Serena. También puedes encontrarnos en google maps como 'Go Waffles'.",
     "horarios": "De lunes a viernes entre las 16:00 y 21:00. Sábado y domingo entre 15:30 y 21:30.",
@@ -27,20 +30,10 @@ info_negocio = {
     "trabajo": "Si quieres trabajar con nosotros, puedes escribir a contacto@gowaffles.cl o rellenar el formulario en gowaffles.cl/nosotros",
     "problemas": "Si tuviste algún inconveniente con tu pedido escríbenos a contacto@gowaffles.cl",
     "ejecutivo": "Si necesitas hablar con un encargado del local, comunícate al https://wa.me/56953717707",
-    "redes_sociales": "Encuentranos en instagram o tiktok como @gowaffles.cl",
-    "categorías": "Tenemos waffles dulces, salados y personalizados. También tenemos milkshakes, frappes, limonadas, Mini Go, helados y bebidas",
-    "zona_delivery": "Cada delivery app tiene su propio radio de despacho. En gowaffles.cl/local puedes ver la cobertura de despacho para las ventas de nuestro sitio web"
+    "redes_sociales":"Encuentranos en instagram o tiktok como @gowaffles.cl",
+    "categorías":"Tenemos waffles dulces, salados y personalizados. También tenemos milkshakes, frappes, limonadas, Mini Go, helados y bebidas",
+    "zona_delivery":"Cada delivery app tiene su propio radio de despacho. En gowaffles.cl/local puedes ver la cobertura de despacho para las ventas de nuestro sitio web"
 }
-
-system_prompt = """
-Eres el asistente virtual de Go Waffles 🍓.
-Responde solo preguntas relacionadas con el negocio usando la información disponible.
-Habla con un tono juvenil y cercano, usando emojis cuando quede bien 😄.
-No inventes precios, horarios, promociones ni contactos que no estén en los datos que tienes.
-Si no sabes algo, responde con amabilidad y sugiere escribir a contacto@gowaffles.cl ✉️.
-No alteres los enlaces web ni cambies su formato. Respétalos exactamente como aparecen porque necesito que sean clickeables.
-Tu meta es sonar natural, claro y buena onda. Evita responder igual ante la misma pregunta para no parecer un bot.
-"""
 
 def generar_contexto(info):
     contexto = "Aquí tienes información de referencia sobre Go Waffles que puedes usar para responder:\n"
@@ -49,104 +42,23 @@ def generar_contexto(info):
     contexto += "\nUsa esta información solo si aplica a la pregunta del usuario.\n"
     return contexto
 
-# ─── FUNCIONES DE MENÚ ───────────────────────────────────────
-
-def obtener_menu():
-    global _menu_cache, _menu_last_fetch
-    ahora = time.time()
-    if ahora - _menu_last_fetch > 300 or _menu_cache is None:  # cada 5 minutos
-        try:
-            url = "https://webdatacdn.getjusto.com/v1/websites/LeH4tbZj5znjrm8wD/menus/5XXLP6masht3zN6ko"
-            response = requests.get(url, timeout=5)
-            data = response.json()
-            _menu_cache = data["data"]["products"]
-            _menu_last_fetch = ahora
-        except Exception as e:
-            print(f"❌ Error al cargar menú: {e}")
-            return {}
-    return _menu_cache
-
-def buscar_en_menu(consulta: str, umbral=45):
-    products = obtener_menu()
-    if not products:
-        return []
-
-    consulta_clean = consulta.lower()
-    resultados = []
-
-    for p in products.values():
-        nombre = p.get("name", "")
-        descripcion = p.get("description", "")
-        texto_completo = f"{nombre} {descripcion}".lower()
-        score = fuzz.partial_ratio(consulta_clean, texto_completo)
-        if score >= umbral:
-            price = (
-                p.get("availabilityAt", {}).get("finalPrice")
-                or p.get("availabilityAt", {}).get("basePrice")
-                or "N/D"
-            )
-            resultados.append({
-                "nombre": nombre,
-                "precio": price,
-                "descripcion": descripcion
-            })
-        if len(resultados) >= 8:
-            break
-
-    return resultados
-
-# ─── DETECCIÓN DE INTENCIÓN CON OPENAI (CLASIFICACIÓN LIGERA) ─────
-
-def es_pregunta_de_menu(mensaje: str) -> bool:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        # Fallback básico por si falla OpenAI
-        palabras = ["waffle", "helado", "milkshake", "frappe", "limonada", "mini", "banana", "plátano", "frutilla", "dulce", "salado", "precio", "cuesta", "tienen", "ingredientes"]
-        return any(p in mensaje.lower() for p in palabras)
-
-    try:
-        client = OpenAI(api_key=api_key)
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Eres un clasificador. Responde SOLO 'sí' o 'no'."},
-                {"role": "user", "content": f"¿La siguiente pregunta está relacionada con pedir, comprar, precios, ingredientes, productos o menú de un local de comida? Pregunta: '{mensaje}'"}
-            ],
-            temperature=0,
-            max_tokens=5,
-            timeout=5
-        )
-        return "sí" in response.choices[0].message.content.lower()
-    except:
-        # Si falla OpenAI, usamos fallback
-        return False
-
-# ─── RESPONDER PREGUNTA (FLUJO PRINCIPAL) ─────────────────────
-
 def responder_pregunta(pregunta):
-    # Siempre obtenemos el menú (con caché)
-    productos_relevantes = buscar_en_menu(pregunta, umbral=45)  # umbral bajo para ser inclusivo
-    
-    # Preparamos contexto
-    contexto = generar_contexto(info_negocio)
+    # Hora actual en La Serena
     chile_tz = pytz.timezone("America/Santiago")
-    hora_actual = datetime.now(chile_tz).strftime("%H:%M")
-    contexto += f"\nHora actual en La Serena, Chile: {hora_actual}\n"
+    ahora = datetime.now(chile_tz)
+    hora_actual = ahora.strftime("%H:%M")
 
-    # Si hay productos relevantes, los agregamos
-    if productos_relevantes:
-        productos_txt = "\n".join([
-            f"- {r['nombre']}: ${r['precio']} {r['descripcion']}".strip()
-            for r in productos_relevantes
-        ])
-        contexto += f"\nProductos relevantes del menú:\n{productos_txt}\n"
 
-    # Siempre usamos OpenAI con toda la info disponible
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
+        print("❌ OPENAI_API_KEY no está definida en las variables de entorno.")
         return "⚠️ Ups, no tengo acceso a mi cerebro. Por favor avisa al equipo de Go Waffles."
 
+    # ✅ Creamos el cliente SOLO cuando se necesita y SOLO si hay clave
     client = OpenAI(api_key=api_key)
+
+    contexto = generar_contexto(info_negocio)
+    contexto += f"\nHora actual en La Serena, Chile: {hora_actual}\n"
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"{contexto}\nPregunta del usuario: {pregunta}"}
@@ -157,32 +69,18 @@ def responder_pregunta(pregunta):
             model="gpt-3.5-turbo",
             messages=messages,
             temperature=0.3,
-            timeout=10
-        )
-        return respuesta.choices[0].message.content
-    except Exception as e:
-        print(f"❌ Error al llamar a OpenAI: {e}")
-        return "¡Ups! Tuve un pequeño error al pensar mi respuesta. ¿Puedes repetirme tu pregunta? 🧇"
-        
-    # Llamada común a OpenAI
-    try:
-        respuesta = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=messages,
-            temperature=0.3,
-            timeout=10
+            timeout=10  # Evita esperas largas
         )
         return respuesta.choices[0].message.content
     except Exception as e:
         print(f"❌ Error al llamar a OpenAI: {e}")
         return "¡Ups! Tuve un pequeño error al pensar mi respuesta. ¿Puedes repetirme tu pregunta? 🧇"
 
-# ─── ENDPOINTS ───────────────────────────────────────────────
-
+# --- ENDPOINT TELEGRAM ---
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request):
     if not TELEGRAM_TOKEN or not TELEGRAM_URL:
-        print("❌ TELEGRAM_TOKEN no está definido.")
+        print("❌ TELEGRAM_TOKEN no está definido en las variables de entorno.")
         return {"status": "error", "detalle": "Token de Telegram no configurado"}
 
     data = await request.json()
@@ -202,11 +100,12 @@ async def telegram_webhook(request: Request):
         response = requests.post(TELEGRAM_URL, json={"chat_id": chat_id, "text": respuesta}, timeout=5)
         response.raise_for_status()
     except Exception as e:
-        print(f"❌ Error al enviar a Telegram: {e}")
+        print(f"❌ Error al enviar mensaje a Telegram: {e}")
         return {"status": "error", "detalle": str(e)}
 
     return {"status": "ok"}
 
+# --- ENDPOINT WEB (para pruebas desde frontend o Postman) ---
 @app.post("/webhook/web")
 async def web_webhook(request: Request):
     data = await request.json()
@@ -214,9 +113,11 @@ async def web_webhook(request: Request):
         mensaje = data["mensaje"]
     except KeyError:
         return {"status": "error", "detalle": "Falta el campo 'mensaje'"}
+
     respuesta = responder_pregunta(mensaje)
     return {"respuesta": respuesta}
 
+# --- HEALTH CHECK ---
 @app.get("/health")
 async def health_check():
     return {
