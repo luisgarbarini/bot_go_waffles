@@ -39,6 +39,7 @@ info_negocio = {
     "ejecutivo": "Si necesitas hablar con un encargado del local, comunícate al https://wa.me/56953717707",
     "redes_sociales":"Encuentranos en instagram o tiktok como @gowaffles.cl",
     "categorías":"Tenemos waffles dulces, salados y personalizados. También tenemos milkshakes, frappes, limonadas, Mini Go, helados y bebidas",
+    "productos":"Si alguien pregunta por productos, ingredientes o pide recomendaciones, dirígelos a gowaffles.cl/pedir para que conozcan toda la variedad de productos",
     "zona_delivery":"Cada delivery app tiene su propio radio de despacho. En gowaffles.cl/local puedes ver la cobertura de despacho para las ventas de nuestro sitio web"
 }
 
