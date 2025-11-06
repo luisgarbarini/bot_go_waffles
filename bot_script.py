@@ -41,6 +41,7 @@ info_negocio = {
     "carta": "Encuentra todos nuestros productos en gowaffles.cl/pedir",
     "trabajo": "Si quieres trabajar con nosotros, puedes escribir a contacto@gowaffles.cl o rellenar el formulario en gowaffles.cl/nosotros",
     "problemas": "Si tuviste algún inconveniente con tu pedido escríbenos a contacto@gowaffles.cl",
+    "retraso": "Si quieres conocer el estado de tu pedido puedes revisarlo directamente en la plataforma en la que hiciste tu pedido (delivery app o gowaffles.cl)",
     "ejecutivo": "Si necesitas hablar con un encargado del local, comunícate al https://wa.me/56953717707",
     "redes_sociales":"Encuentranos en instagram o tiktok como @gowaffles.cl",
     "categorías":"Tenemos waffles dulces, salados y personalizados. También tenemos milkshakes, frappes, limonadas, Mini Go, helados y bebidas",
