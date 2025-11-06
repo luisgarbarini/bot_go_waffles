@@ -66,22 +66,19 @@ def obtener_menu():
             return {}
     return _menu_cache
 
-def buscar_en_menu(consulta: str, umbral=60):
+def buscar_en_menu(consulta: str, umbral=45):
     products = obtener_menu()
     if not products:
         return []
 
-    consulta_clean = consulta.lower().strip()
+    consulta_clean = consulta.lower()
     resultados = []
 
     for p in products.values():
         nombre = p.get("name", "")
         descripcion = p.get("description", "")
         texto_completo = f"{nombre} {descripcion}".lower()
-
-        # Comparar la consulta contra nombre + descripción
         score = fuzz.partial_ratio(consulta_clean, texto_completo)
-        
         if score >= umbral:
             price = (
                 p.get("availabilityAt", {}).get("finalPrice")
@@ -93,13 +90,8 @@ def buscar_en_menu(consulta: str, umbral=60):
                 "precio": price,
                 "descripcion": descripcion
             })
-
-        # Evitar listas muy largas
-        if len(resultados) >= 6:
+        if len(resultados) >= 8:
             break
-
-    # Ordenar por score (opcional, pero mejora relevancia)
-    # → No lo hacemos aquí porque fuzz.partial_ratio no se guarda, pero si quieres, puedo añadirlo
 
     return resultados
 
@@ -132,46 +124,46 @@ def es_pregunta_de_menu(mensaje: str) -> bool:
 # ─── RESPONDER PREGUNTA (FLUJO PRINCIPAL) ─────────────────────
 
 def responder_pregunta(pregunta):
-    # ✅ Paso 1: ¿Es sobre el menú?
-    if es_pregunta_de_menu(pregunta):
-        resultados = buscar_en_menu(pregunta)
-        if resultados:
-            productos_txt = "\n".join([
-                f"- {r['nombre']}: ${r['precio']} {r['descripcion']}".strip()
-                for r in resultados
-            ])
-            contexto_final = f"Información de productos relevantes:\n{productos_txt}\n\nResponde con tono amable y juvenil, usando emojis si queda bien."
-        else:
-            contexto_final = "No se encontraron productos relacionados con la consulta del usuario. Sugiere visitar gowaffles.cl/pedir para ver todo el menú."
+    # Siempre obtenemos el menú (con caché)
+    productos_relevantes = buscar_en_menu(pregunta, umbral=45)  # umbral bajo para ser inclusivo
+    
+    # Preparamos contexto
+    contexto = generar_contexto(info_negocio)
+    chile_tz = pytz.timezone("America/Santiago")
+    hora_actual = datetime.now(chile_tz).strftime("%H:%M")
+    contexto += f"\nHora actual en La Serena, Chile: {hora_actual}\n"
 
-        # Usa OpenAI SOLO con esta info acotada
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            return "⚠️ Ups, no tengo acceso a mi cerebro. Por favor avisa al equipo de Go Waffles."
+    # Si hay productos relevantes, los agregamos
+    if productos_relevantes:
+        productos_txt = "\n".join([
+            f"- {r['nombre']}: ${r['precio']} {r['descripcion']}".strip()
+            for r in productos_relevantes
+        ])
+        contexto += f"\nProductos relevantes del menú:\n{productos_txt}\n"
 
-        client = OpenAI(api_key=api_key)
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"{contexto_final}\n\nPregunta del usuario: {pregunta}"}
-        ]
-    else:
-        # Flujo original: info de negocio + hora
-        chile_tz = pytz.timezone("America/Santiago")
-        ahora = datetime.now(chile_tz)
-        hora_actual = ahora.strftime("%H:%M")
+    # Siempre usamos OpenAI con toda la info disponible
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return "⚠️ Ups, no tengo acceso a mi cerebro. Por favor avisa al equipo de Go Waffles."
 
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            return "⚠️ Ups, no tengo acceso a mi cerebro. Por favor avisa al equipo de Go Waffles."
+    client = OpenAI(api_key=api_key)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"{contexto}\nPregunta del usuario: {pregunta}"}
+    ]
 
-        client = OpenAI(api_key=api_key)
-        contexto = generar_contexto(info_negocio)
-        contexto += f"\nHora actual en La Serena, Chile: {hora_actual}\n"
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"{contexto}\nPregunta del usuario: {pregunta}"}
-        ]
-
+    try:
+        respuesta = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
+            temperature=0.3,
+            timeout=10
+        )
+        return respuesta.choices[0].message.content
+    except Exception as e:
+        print(f"❌ Error al llamar a OpenAI: {e}")
+        return "¡Ups! Tuve un pequeño error al pensar mi respuesta. ¿Puedes repetirme tu pregunta? 🧇"
+        
     # Llamada común a OpenAI
     try:
         respuesta = client.chat.completions.create(
