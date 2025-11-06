@@ -7,6 +7,9 @@ from openai import OpenAI
 
 app = FastAPI()
 
+historial_chats = {}  # {chat_id: [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}
+MAX_MENSAJES = 10  # Límite para no exceder tokens
+
 # Obtenemos las variables de entorno (pero NO creamos el cliente aún)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage" if TELEGRAM_TOKEN else ""
@@ -42,27 +45,38 @@ def generar_contexto(info):
     contexto += "\nUsa esta información solo si aplica a la pregunta del usuario.\n"
     return contexto
 
-def responder_pregunta(pregunta):
-    # Hora actual en La Serena
+def responder_pregunta_con_historial(historial, chat_id):
     chile_tz = pytz.timezone("America/Santiago")
     ahora = datetime.now(chile_tz)
     hora_actual = ahora.strftime("%H:%M")
 
-
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        print("❌ OPENAI_API_KEY no está definida en las variables de entorno.")
         return "⚠️ Ups, no tengo acceso a mi cerebro. Por favor avisa al equipo de Go Waffles."
 
-    # ✅ Creamos el cliente SOLO cuando se necesita y SOLO si hay clave
     client = OpenAI(api_key=api_key)
 
-    contexto = generar_contexto(info_negocio)
-    contexto += f"\nHora actual en La Serena, Chile: {hora_actual}\n"
+    # Contexto fijo (solo como referencia de reglas, NO como parte del chat)
+    contexto_fijo = generar_contexto(info_negocio)
+    contexto_fijo += f"\nHora actual en La Serena, Chile: {hora_actual}\n"
+
+    # Mensajes que se envían al modelo
     messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"{contexto}\nPregunta del usuario: {pregunta}"}
+        {"role": "system", "content": system_prompt + "\n\n" + contexto_fijo},
     ]
+    messages.extend(historial)  # Añadir todo el historial del chat
+
+    try:
+        respuesta = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
+            temperature=0.3,
+            timeout=10
+        )
+        return respuesta.choices[0].message.content
+    except Exception as e:
+        print(f"❌ Error al llamar a OpenAI: {e}")
+        return "¡Ups! Tuve un pequeño error al pensar mi respuesta. ¿Puedes repetirme tu pregunta? 🧇"
 
     try:
         respuesta = client.chat.completions.create(
@@ -93,7 +107,23 @@ async def telegram_webhook(request: Request):
         print("⚠️ Mensaje sin texto o chat_id. Ignorado.")
         return {"status": "ignored"}
 
-    respuesta = responder_pregunta(mensaje)
+    # --- Gestionar historial por chat_id ---
+    if chat_id not in historial_chats:
+        historial_chats[chat_id] = []
+    
+    # Añadir el mensaje del usuario al historial
+    historial_chats[chat_id].append({"role": "user", "content": mensaje})
+
+    # Limitar el historial para evitar exceder tokens
+    if len(historial_chats[chat_id]) > MAX_MENSAJES:
+        historial_chats[chat_id] = historial_chats[chat_id][-MAX_MENSAJES:]
+
+    # Obtener respuesta usando el historial completo + contexto fijo
+    respuesta = responder_pregunta_con_historial(historial_chats[chat_id], chat_id)
+
+    # Guardar respuesta en historial
+    historial_chats[chat_id].append({"role": "assistant", "content": respuesta})
+
     print(f"📤 Respondiendo a {chat_id}: {respuesta}")
 
     try:
@@ -104,7 +134,7 @@ async def telegram_webhook(request: Request):
         return {"status": "error", "detalle": str(e)}
 
     return {"status": "ok"}
-
+    
 # --- ENDPOINT WEB (para pruebas desde frontend o Postman) ---
 @app.post("/webhook/web")
 async def web_webhook(request: Request):
@@ -114,7 +144,7 @@ async def web_webhook(request: Request):
     except KeyError:
         return {"status": "error", "detalle": "Falta el campo 'mensaje'"}
 
-    respuesta = responder_pregunta(mensaje)
+    respuesta = responder_pregunta_con_historial(historial, chat_id)
     return {"respuesta": respuesta}
 
 # --- HEALTH CHECK ---
