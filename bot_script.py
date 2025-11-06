@@ -70,22 +70,31 @@ def buscar_en_menu(consulta: str, umbral=60):
     products = obtener_menu()
     if not products:
         return []
+    
     nombres = [p.get("name", "") for p in products.values()]
     coincidencias = process.extract(consulta, nombres, limit=3)
     resultados = []
-    for nombre_coincidencia, score, idx in coincidencias:
+    
+    for item in coincidencias:
+        # Soporta tanto (nombre, score) como (nombre, score, idx)
+        nombre_coincidencia = item[0]
+        score = item[1]
+        
         if score >= umbral:
-            p = list(products.values())[idx]
-            price = (
-                p.get("availabilityAt", {}).get("finalPrice")
-                or p.get("availabilityAt", {}).get("basePrice")
-                or "N/D"
-            )
-            resultados.append({
-                "nombre": p.get("name"),
-                "precio": int(price) if isinstance(price, (int, float)) else price,
-                "descripcion": p.get("description", "")
-            })
+            # Encontrar el producto por nombre
+            for p in products.values():
+                if p.get("name") == nombre_coincidencia:
+                    price = (
+                        p.get("availabilityAt", {}).get("finalPrice")
+                        or p.get("availabilityAt", {}).get("basePrice")
+                        or "N/D"
+                    )
+                    resultados.append({
+                        "nombre": p.get("name"),
+                        "precio": price,
+                        "descripcion": p.get("description", "")
+                    })
+                    break
     return resultados
 
 # ─── DETECCIÓN DE INTENCIÓN CON OPENAI (CLASIFICACIÓN LIGERA) ─────
