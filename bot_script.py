@@ -10,7 +10,7 @@ app = FastAPI()
 historial_chats = {}  # {chat_id: [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}
 MAX_MENSAJES = 10  # Límite para no exceder tokens
 
-# Obtenemos las variables de entorno (pero NO creamos el cliente aún)
+# Obtenemos las variables de entorno
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage" if TELEGRAM_TOKEN else ""
 
@@ -21,7 +21,11 @@ Habla con un tono juvenil y cercano, usando emojis cuando quede bien 😄.
 No inventes precios, horarios, promociones, toppings o información de productos. 
 Si no sabes algo, responde con amabilidad y sugiere escribir a contacto@gowaffles.cl ✉️. 
 No alteres los enlaces web ni cambies su formato. Respétalos exactamente como aparecen porque necesito que sean clickeables.
-Tu meta es sonar natural, claro y buena onda. Evita responder igual ante la misma pregunta para no parecer un bot.
+
+❗ IMPORTANTE: Si ya estás en medio de una conversación (el usuario ya te ha escrito antes), 
+NO debes saludar con "¡Hola!" ni frases de bienvenida. Ve directo al punto.
+
+Tu meta es sonar natural, claro y buena onda. Evita dar respuestas repetitivas para no parecer un bot.
 """
 
 info_negocio = {
@@ -56,15 +60,14 @@ def responder_pregunta_con_historial(historial, chat_id):
 
     client = OpenAI(api_key=api_key)
 
-    # Contexto fijo (solo como referencia de reglas, NO como parte del chat)
+    # Contexto fijo
     contexto_fijo = generar_contexto(info_negocio)
     contexto_fijo += f"\nHora actual en La Serena, Chile: {hora_actual}\n"
 
-    # Mensajes que se envían al modelo
     messages = [
         {"role": "system", "content": system_prompt + "\n\n" + contexto_fijo},
     ]
-    messages.extend(historial)  # Añadir todo el historial del chat
+    messages.extend(historial)
 
     try:
         respuesta = client.chat.completions.create(
@@ -72,18 +75,6 @@ def responder_pregunta_con_historial(historial, chat_id):
             messages=messages,
             temperature=0.3,
             timeout=10
-        )
-        return respuesta.choices[0].message.content
-    except Exception as e:
-        print(f"❌ Error al llamar a OpenAI: {e}")
-        return "¡Ups! Tuve un pequeño error al pensar mi respuesta. ¿Puedes repetirme tu pregunta? 🧇"
-
-    try:
-        respuesta = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=messages,
-            temperature=0.3,
-            timeout=10  # Evita esperas largas
         )
         return respuesta.choices[0].message.content
     except Exception as e:
@@ -107,21 +98,16 @@ async def telegram_webhook(request: Request):
         print("⚠️ Mensaje sin texto o chat_id. Ignorado.")
         return {"status": "ignored"}
 
-    # --- Gestionar historial por chat_id ---
     if chat_id not in historial_chats:
         historial_chats[chat_id] = []
     
-    # Añadir el mensaje del usuario al historial
     historial_chats[chat_id].append({"role": "user", "content": mensaje})
 
-    # Limitar el historial para evitar exceder tokens
     if len(historial_chats[chat_id]) > MAX_MENSAJES:
         historial_chats[chat_id] = historial_chats[chat_id][-MAX_MENSAJES:]
 
-    # Obtener respuesta usando el historial completo + contexto fijo
     respuesta = responder_pregunta_con_historial(historial_chats[chat_id], chat_id)
 
-    # Guardar respuesta en historial
     historial_chats[chat_id].append({"role": "assistant", "content": respuesta})
 
     print(f"📤 Respondiendo a {chat_id}: {respuesta}")
@@ -134,7 +120,7 @@ async def telegram_webhook(request: Request):
         return {"status": "error", "detalle": str(e)}
 
     return {"status": "ok"}
-    
+
 # --- ENDPOINT WEB (para pruebas desde frontend o Postman) ---
 @app.post("/webhook/web")
 async def web_webhook(request: Request):
@@ -144,7 +130,8 @@ async def web_webhook(request: Request):
     except KeyError:
         return {"status": "error", "detalle": "Falta el campo 'mensaje'"}
 
-    respuesta = responder_pregunta_con_historial(historial, chat_id)
+    historial_simulado = [{"role": "user", "content": mensaje}]
+    respuesta = responder_pregunta_con_historial(historial_simulado, chat_id="web_test")
     return {"respuesta": respuesta}
 
 # --- HEALTH CHECK ---
